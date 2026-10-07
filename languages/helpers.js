@@ -21,7 +21,10 @@ function read(projectPath, file) {
 
 function listFiles(projectPath) {
     return fs
-        .readdirSync(projectPath, { withFileTypes: true })
+        .readdirSync(
+            projectPath,
+            { withFileTypes: true }
+        )
         .filter(entry => entry.isFile())
         .map(entry => entry.name);
 }
@@ -57,7 +60,8 @@ function run(command, args, cwd) {
 // Runs a command without blocking.
 // Useful for web servers that keep running.
 function runAsync(command, args, cwd) {
-    const { spawn } = require("child_process");
+    const { spawn } =
+        require("child_process");
 
     console.log(
         `\n🚀 Running: ${command} ${args.join(" ")}\n`
@@ -97,21 +101,30 @@ function build(command, args, cwd) {
         }
     );
 
-    return !result.error && result.status === 0;
+    return !result.error &&
+        result.status === 0;
 }
 
 // Picks the entry file: first of `names` that exists,
 // otherwise the only file with one of `exts`.
-function findEntry(projectPath, names, exts = []) {
+function findEntry(
+    projectPath,
+    names,
+    exts = []
+) {
     for (const name of names) {
         if (exists(projectPath, name)) {
             return name;
         }
     }
 
-    const files = listFiles(projectPath).filter(file =>
-        exts.some(ext => file.endsWith(ext))
-    );
+    const files =
+        listFiles(projectPath)
+            .filter(file =>
+                exts.some(ext =>
+                    file.endsWith(ext)
+                )
+            );
 
     return files.length === 1
         ? files[0]
@@ -143,7 +156,10 @@ function outDir(projectPath) {
 
 // Finds executables created after `since` (ms)
 // in the usual build folders.
-function newExecutables(projectPath, since) {
+function newExecutables(
+    projectPath,
+    since
+) {
     const found = [];
 
     for (const folder of [
@@ -161,12 +177,10 @@ function newExecutables(projectPath, since) {
             continue;
         }
 
-        for (
-            const entry of fs.readdirSync(
-                dir,
-                { withFileTypes: true }
-            )
-        ) {
+        for (const entry of fs.readdirSync(
+            dir,
+            { withFileTypes: true }
+        )) {
             if (!entry.isFile()) {
                 continue;
             }
@@ -176,10 +190,25 @@ function newExecutables(projectPath, since) {
                 entry.name
             );
 
-            const stat = fs.statSync(file);
+            const stat =
+                fs.statSync(file);
+
+            if (stat.mtimeMs < since) {
+                continue;
+            }
+
+            if (process.platform === "win32") {
+                if (
+                    entry.name.toLowerCase()
+                        .endsWith(".exe")
+                ) {
+                    found.push(file);
+                }
+
+                continue;
+            }
 
             if (
-                stat.mtimeMs >= since &&
                 (stat.mode & 0o111) &&
                 !entry.name.includes(".")
             ) {

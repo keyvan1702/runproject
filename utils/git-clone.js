@@ -1,5 +1,5 @@
 const readline = require("readline");
-const { execSync } = require("child_process");
+const { spawnSync } = require("child_process");
 const fs = require("fs");
 
 function ask(question) {
@@ -16,25 +16,20 @@ function ask(question) {
     });
 }
 
-
-async function cloneIfEmpty(path) {
-
-    const files = fs.readdirSync(path);
+async function cloneIfEmpty(projectPath) {
+    const files = fs.readdirSync(projectPath);
 
     if (files.length > 0) {
         return false;
     }
 
-
     console.log(
         "\n📂 Current folder is empty.\n"
     );
 
-
     const answer = await ask(
         "Do you want to clone a GitHub project? (y/n): "
     );
-
 
     if (
         answer.toLowerCase() !== "y"
@@ -42,38 +37,53 @@ async function cloneIfEmpty(path) {
         return false;
     }
 
-
     const url = await ask(
         "\n🔗 GitHub URL: "
     );
-
 
     if (!url) {
         return false;
     }
 
-
     console.log(
-        "\n⬇️ Cloning project...\n"
+        "\n⬇ Cloning project...\n"
     );
 
-
-    execSync(
-        `git clone ${url} .`,
+    const result = spawnSync(
+        "git",
+        [
+            "clone",
+            url,
+            "."
+        ],
         {
-            cwd: path,
-            stdio: "inherit"
+            cwd: projectPath,
+            stdio: "inherit",
+            shell: false
         }
     );
 
+    if (result.error) {
+        console.log(
+            `\n❌ Failed to run git: ${result.error.message}\n`
+        );
+
+        return false;
+    }
+
+    if (result.status !== 0) {
+        console.log(
+            "\n❌ Git clone failed\n"
+        );
+
+        return false;
+    }
 
     console.log(
         "\n✅ Project cloned successfully\n"
     );
 
-
     return true;
 }
-
 
 module.exports = cloneIfEmpty;

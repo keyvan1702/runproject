@@ -2,17 +2,36 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
-function runCommand(command, args, projectPath) {
-    console.log(`\n🚀 Running: ${command} ${args.join(" ")}\n`);
+function getCommand(command) {
+    if (process.platform === "win32") {
+        return `${command}.cmd`;
+    }
 
-    const result = spawnSync(command, args, {
-        cwd: projectPath,
-        stdio: "inherit",
-        shell: false
-    });
+    return command;
+}
+
+function runCommand(command, args, projectPath) {
+    const executable = getCommand(command);
+
+    console.log(
+        `\n🚀 Running: ${executable} ${args.join(" ")}\n`
+    );
+
+    const result = spawnSync(
+        executable,
+        args,
+        {
+            cwd: projectPath,
+            stdio: "inherit",
+            shell: false
+        }
+    );
 
     if (result.error) {
-        console.log(`❌ Failed to run ${command}`);
+        console.log(
+            `❌ Failed to run ${executable}: ${result.error.message}`
+        );
+
         return false;
     }
 
@@ -25,10 +44,14 @@ function runNodeProject(projectPath) {
 
     if (fs.existsSync(packageJsonPath)) {
         const packageJson = JSON.parse(
-            fs.readFileSync(packageJsonPath, "utf8")
+            fs.readFileSync(
+                packageJsonPath,
+                "utf8"
+            )
         );
 
-        const scripts = packageJson.scripts || {};
+        const scripts =
+            packageJson.scripts || {};
 
         if (scripts.dev) {
             return runCommand(
@@ -55,7 +78,11 @@ function runNodeProject(projectPath) {
     ];
 
     for (const file of mainFiles) {
-        const filePath = path.join(projectPath, file);
+        const filePath =
+            path.join(
+                projectPath,
+                file
+            );
 
         if (fs.existsSync(filePath)) {
             return runCommand(
@@ -66,7 +93,9 @@ function runNodeProject(projectPath) {
         }
     }
 
-    console.log("❌ Could not determine how to run this Node.js project");
+    console.log(
+        "❌ Could not determine how to run this Node.js project"
+    );
 
     return false;
 }

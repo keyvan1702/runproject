@@ -1,82 +1,139 @@
-const { execSync } = require("child_process");
+const { spawnSync } = require("child_process");
 
-function command(cmd) {
-    try {
-        return execSync(cmd, {
-            encoding: "utf8"
-        }).trim();
-    } catch {
+function runCommand(
+    command,
+    args = [],
+    options = {}
+) {
+    const result = spawnSync(
+        command,
+        args,
+        {
+            encoding: "utf8",
+            ...options
+        }
+    );
+
+    if (result.error) {
         return null;
     }
+
+    return result;
 }
 
+function isLinux() {
+    return process.platform === "linux";
+}
 
 function isRunning(service) {
-    return command(
-        `systemctl is-active ${service}`
-    ) === "active";
-}
-
-
-function start(service) {
-    console.log(`🔧 Starting ${service}...`);
-
-    try {
-        execSync(
-            `sudo systemctl start ${service}`,
-            {
-                stdio: "inherit"
-            }
-        );
-
-        return isRunning(service);
-
-    } catch {
+    if (!isLinux()) {
         return false;
     }
+
+    const result = runCommand(
+        "systemctl",
+        [
+            "is-active",
+            service
+        ]
+    );
+
+    if (!result) {
+        return false;
+    }
+
+    return (
+        result.status === 0 &&
+        result.stdout.trim() === "active"
+    );
 }
 
+function start(service) {
+    console.log(
+        `🔧 Starting ${service}...`
+    );
+
+    if (!isLinux()) {
+        console.log(
+            `⚠ Automatic service management is not supported on ${process.platform}`
+        );
+
+        return false;
+    }
+
+    const result = runCommand(
+        "sudo",
+        [
+            "systemctl",
+            "start",
+            service
+        ],
+        {
+            stdio: "inherit"
+        }
+    );
+
+    if (!result || result.status !== 0) {
+        return false;
+    }
+
+    return isRunning(service);
+}
 
 function ensure(service) {
+    if (!isLinux()) {
+        console.log(
+            `⚠ Cannot automatically manage ${service} on ${process.platform}`
+        );
+
+        return false;
+    }
 
     if (isRunning(service)) {
         console.log(
             `✅ ${service} running`
         );
+
         return true;
     }
 
-
     console.log(
-        `⚠️ ${service} stopped`
+        `⚠ ${service} stopped`
     );
 
     return start(service);
 }
 
-
-module.exports = {
-    ensure,
-    isRunning,
-    start
-};
 function ensureDatabase(projectPath) {
-
     const detector =
         require("./database-detector");
 
-
     const db =
-        detector.detectDatabase(projectPath);
-
+        detector.detectDatabase(
+            projectPath
+        );
 
     console.log(
         `🗄 Database: ${db.type || "none"}`
     );
 
+    if (db.services.length === 0) {
+        return true;
+    }
+
+    if (!isLinux()) {
+        console.log(
+            `⚠ Database service detected, but automatic service management is not supported on ${process.platform}`
+        );
+
+        console.log(
+            "ℹ️ Please make sure the database server is running."
+        );
+
+        return false;
+    }
 
     for (const service of db.services) {
-
         if (isRunning(service)) {
             console.log(
                 `✅ ${service} running`
@@ -84,7 +141,6 @@ function ensureDatabase(projectPath) {
 
             return true;
         }
-
 
         if (start(service)) {
             console.log(
@@ -95,9 +151,10 @@ function ensureDatabase(projectPath) {
         }
     }
 
+    return false;
+}
 
-    return db.services.length === 0;
-}module.exports = {
+module.exports = {
     ensure,
     isRunning,
     start,
