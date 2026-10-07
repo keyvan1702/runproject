@@ -1,8 +1,8 @@
 const readline = require("readline");
-
 const { detectLanguage } = require("./languages");
+const cloneIfEmpty = require("./utils/git-clone");
 
-const projectPath = process.cwd();
+const { execSync } = require("child_process");
 
 function ask(question) {
     return new Promise(resolve => {
@@ -13,39 +13,117 @@ function ask(question) {
 
         rl.question(question, answer => {
             rl.close();
-            resolve(answer.trim().toLowerCase());
+            resolve(answer.trim());
         });
     });
 }
 
 async function main() {
+
+    const projectPath = process.cwd();
+
+    // اگر پوشه خالی بود، پیشنهاد clone بده
+    await cloneIfEmpty(projectPath, ask);
+
+
     console.log("🔍 Analyzing project...\n");
+
 
     const project = detectLanguage(projectPath);
 
+
     if (!project) {
+
         console.log(
-            "❌ Could not detect project language"
+            "\n❌ Could not detect project language\n"
         );
 
+        const answer = await ask(
+            "🌐 Do you want to clone a project from GitHub? (y/n): "
+        );
+
+
+        if (answer.toLowerCase() === "y") {
+
+            const repo = await ask(
+                "🔗 Enter GitHub repository URL: "
+            );
+
+
+            if (!repo) {
+                console.log(
+                    "❌ No URL provided"
+                );
+
+                process.exit(1);
+            }
+
+
+            console.log(
+                "\n📥 Cloning repository...\n"
+            );
+
+
+            try {
+
+                execSync(
+                    `git clone ${repo} .`,
+                    {
+                        stdio: "inherit",
+                        cwd: projectPath
+                    }
+                );
+
+
+                console.log(
+                    "\n✅ Clone completed\n"
+                );
+
+
+            } catch (err) {
+
+                console.log(
+                    "\n❌ Clone failed"
+                );
+
+                process.exit(1);
+            }
+
+
+            // دوباره تشخیص بده
+            return main();
+
+        }
+
+
         process.exit(1);
+
     }
+
+
 
     console.log(`✅ Language: ${project.name}`);
     console.log(`🔧 Type: ${project.id}`);
 
+
+
     console.log("\n⚙ Checking runtime...");
+
 
     const tools =
         typeof project.tools === "function"
             ? project.tools(projectPath)
             : [];
 
+
     for (const tool of tools) {
+
         let installed = false;
 
+
         try {
-            require("child_process").execSync(
+
+            execSync(
                 `command -v ${tool.command}`,
                 {
                     stdio: "ignore",
@@ -54,119 +132,163 @@ async function main() {
             );
 
             installed = true;
+
+
         } catch {
+
             installed = false;
+
         }
 
+
+
         if (installed) {
+
             console.log(
                 `✅ ${tool.command} is installed`
             );
 
-            continue;
-        }
+        } else {
 
-        console.log(
-            `❌ ${tool.command} is not installed`
-        );
-
-        console.log(
-            `📦 Required package: ${tool.package}`
-        );
-
-        const answer = await ask(
-            `\n❓ Install ${tool.package} using pacman? (y/n): `
-        );
-
-        if (answer !== "y") {
             console.log(
-                "❌ Runtime installation cancelled"
+                `❌ ${tool.command} missing`
             );
 
-            process.exit(1);
+
+            const answer = await ask(
+                `Install ${tool.package}? (y/n): `
+            );
+
+
+            if (answer.toLowerCase() !== "y") {
+
+                process.exit(1);
+
+            }
+
+
+            const install =
+                require("./installers/arch");
+
+
+            if (!install(tool.package)) {
+
+                process.exit(1);
+
+            }
+
         }
 
-        const installPackage =
-            require("./installers/arch");
-
-        if (!installPackage(tool.package)) {
-            process.exit(1);
-        }
     }
 
-    if (
-        typeof project.dependencies === "function"
-    ) {
+
+
+    if (typeof project.dependencies === "function") {
+
+
         const dependencies =
             project.dependencies(projectPath);
 
+
+
         if (dependencies) {
+
+
             console.log(
                 "\n📚 Checking dependencies..."
             );
 
+
+
             if (dependencies.installed) {
+
+
                 console.log(
                     "✅ Dependencies are installed"
                 );
+
+
             } else {
+
+
                 console.log(
-                    "❌ Dependencies are not installed"
+                    "❌ Dependencies missing"
                 );
+
 
                 const answer = await ask(
-                    `\n❓ ${
-                        dependencies.prompt ||
-                        "Install dependencies?"
-                    } (y/n): `
+                    `${dependencies.prompt || "Install dependencies?"} (y/n): `
                 );
 
-                if (answer !== "y") {
-                    console.log(
-                        "❌ Dependency installation cancelled"
-                    );
+
+
+                if (answer.toLowerCase() !== "y") {
 
                     process.exit(1);
+
                 }
+
+
 
                 if (!dependencies.install()) {
+
                     console.log(
-                        "❌ Dependency installation failed"
+                        "❌ Installation failed"
                     );
 
                     process.exit(1);
+
                 }
 
-                console.log(
-                    "✅ Dependencies installed"
-                );
+
             }
+
         }
+
     }
 
-    console.log("\n🎯 Analysis complete!");
+
+
+    console.log(
+        "\n🎯 Analysis complete!"
+    );
+
+
 
     if (typeof project.run !== "function") {
+
         console.log(
-            `❌ No runner available for ${project.name}`
+            "❌ No runner available"
         );
 
         process.exit(1);
+
     }
+
+
 
     const exitCode =
         await project.run(projectPath);
 
+
+
     if (exitCode !== 0) {
+
         process.exit(exitCode);
+
     }
+
 }
 
-main().catch(error => {
+
+
+main().catch(err => {
+
     console.error(
         "❌ Error:",
-        error.message
+        err.message
     );
 
     process.exit(1);
+
 });
