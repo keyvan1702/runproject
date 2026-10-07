@@ -1,14 +1,14 @@
 const {
     exists,
+    read,
     run,
     runAsync,
-    build,
     findEntry,
     noEntry
 } = require("./helpers");
 
-const services =
-    require("../services/manager");
+const detectPackageManager =
+    require("../installers/package-manager");
 
 const openBrowser =
     require("../web/browser");
@@ -17,72 +17,95 @@ const { findPort } =
     require("../web/port");
 
 
-function waitForServer(url, timeout = 20000) {
+function packageManager(projectPath) {
+    return detectPackageManager(projectPath) || "npm";
+}
 
+
+function getPortFromSource(projectPath, entry) {
+    if (!entry) {
+        return 3000;
+    }
+
+    const source = read(projectPath, entry);
+
+    const match =
+        source.match(
+            /(?:const|let|var)\s+port\s*=\s*(\d+)/
+        );
+
+    if (match) {
+        return Number(match[1]);
+    }
+
+    const listenMatch =
+        source.match(
+            /\.listen\s*\(\s*(\d+)/
+        );
+
+    if (listenMatch) {
+        return Number(listenMatch[1]);
+    }
+
+    return 3000;
+}
+
+
+function waitForServer(url, timeout = 20000) {
     const http = require("http");
+    const https = require("https");
 
     return new Promise(resolve => {
-
         const start = Date.now();
 
         function check() {
+            const client =
+                url.startsWith("https")
+                    ? https
+                    : http;
 
-            const req = http.get(
+            const req = client.get(
                 url,
                 res => {
-
                     res.resume();
                     resolve(true);
-
                 }
             );
 
-
             req.on("error", () => {
-
                 if (Date.now() - start >= timeout) {
-
                     resolve(false);
-
                     return;
                 }
 
-
-                setTimeout(
-                    check,
-                    300
-                );
-
+                setTimeout(check, 300);
             });
 
+            req.setTimeout(1000, () => {
+                req.destroy();
 
-            req.setTimeout(
-                1000,
-                () => {
-
-                    req.destroy();
-
+                if (Date.now() - start >= timeout) {
+                    resolve(false);
+                    return;
                 }
-            );
 
+                setTimeout(check, 300);
+            });
         }
 
-
         check();
-
     });
-
 }
-
 
 
 async function runWeb(
     command,
     args,
     cwd,
-    url
+    port
 ) {
-
+    const url =
+        `http://localhost:${port}`;
 
     runAsync(
         command,
@@ -90,240 +113,394 @@ async function runWeb(
         cwd
     );
 
-
     console.log(
         `\n🌐 Waiting for web server: ${url}\n`
     );
 
-
     const ready =
         await waitForServer(url);
 
-
     if (ready) {
-
         console.log(
             `✅ Web server is ready: ${url}`
         );
-
 
         console.log(
             "🌐 Opening browser...\n"
         );
 
-
         openBrowser(url);
-
-
     } else {
-
         console.log(
-            "⚠️ Server not ready"
+            "⚠️ Web server did not become ready within 20 seconds"
         );
-
     }
 
-
     return 0;
-
 }
 
 
-
 module.exports = {
+    id: "node",
 
-    id: "php",
-
-    name: "PHP",
-
+    name:
+        "Node.js / JavaScript / TypeScript",
 
     manifests: [
-        "composer.json",
-        "artisan"
+        "package.json"
     ],
-
 
     extensions: [
-        ".php"
+        ".js",
+        ".mjs",
+        ".cjs",
+        ".ts"
     ],
 
 
-
-    tools(p) {
-
+    tools(projectPath) {
         const tools = [
             {
-                command:"php",
-                package:"php"
+                command: "node",
+                package: "nodejs"
+            },
+            {
+                command: "npm",
+                package: "npm"
             }
         ];
 
+        const pm =
+            packageManager(projectPath);
 
-        if (exists(p,"composer.json")) {
-
+        if (pm === "pnpm") {
             tools.push({
-                command:"composer",
-                package:"composer"
+                command: "pnpm",
+                package: "pnpm"
             });
-
         }
 
+        if (pm === "yarn") {
+            tools.push({
+                command: "yarn",
+                package: "yarn"
+            });
+        }
+
+        if (pm === "bun") {
+            tools.push({
+                command: "bun",
+                package: "bun"
+            });
+        }
 
         return tools;
-
     },
 
 
-
-    dependencies(p) {
-
-
-        if (!exists(p,"composer.json")) {
-
+    dependencies(projectPath) {
+        if (!exists(
+            projectPath,
+            "package.json"
+        )) {
             return null;
+        }
 
+        let pkg;
+
+        try {
+            pkg = JSON.parse(
+                read(
+                    projectPath,
+                    "package.json"
+                ) || "{}"
+            );
+        } catch {
+            return null;
+        }
+
+        const dependencies = {
+            ...(pkg.dependencies || {}),
+            ...(pkg.devDependencies || {})
+        };
+
+        const names =
+            Object.keys(dependencies);
+
+        if (names.length === 0) {
+            return null;
+        }
+
+        const missing =
+            names.filter(name =>
+                !exists(
+                    projectPath,
+                    "node_modules",
+                    name
+                )
+            );
+
+        const pm =
+            packageManager(projectPath);
+
+        return {
+            label:
+                `${names.length} packages (${pm})`,
+
+            installed:
+                missing.length === 0,
+
+            missing,
+
+            prompt:
+                missing.length > 0
+                    ? `Install missing dependencies: ${missing.join(", ")} using ${pm}?`
+                    : `Install dependencies using ${pm}?`,
+
+            install() {
+                return (
+                    run(
+                        pm,
+                        ["install"],
+                        projectPath
+                    ) === 0
+                );
+            }
+        };
+    },
+
+
+    async run(projectPath) {
+        const pm =
+            packageManager(projectPath);
+
+        let pkg = {};
+
+        if (exists(
+            projectPath,
+            "package.json"
+        )) {
+            try {
+                pkg = JSON.parse(
+                    read(
+                        projectPath,
+                        "package.json"
+                    ) || "{}"
+                );
+            } catch {
+                pkg = {};
+            }
         }
 
 
-        return {
-
-            label:"composer",
-
-
-            installed:
-                exists(
-                    p,
-                    "vendor"
-                ),
+        const scripts =
+            pkg.scripts || {};
 
 
-            prompt:
-                "Install dependencies using composer?",
+        /*
+         * Development server
+         */
 
-
-
-            install:()=> 
-                build(
-                    "composer",
-                    [
-                        "install"
-                    ],
-                    p
-                )
-
-        };
-
-    },
-
-
-
-    async run(p) {
-
-
-        if (exists(p,"artisan")) {
-
-
-            console.log(
-                "\n⚙ Checking Laravel services...\n"
-            );
-
-
-            services.ensureDatabase(p);
-
-
-            console.log(
-                "\n⚙ Preparing Laravel...\n"
-            );
-
-
+        if (scripts.dev) {
             const port =
-                await findPort(8000);
-
-
+                await findPort(3000);
 
             return runWeb(
-
-                "php",
-
+                pm,
                 [
-                    "artisan",
-                    "serve",
+                    "run",
+                    "dev",
+                    "--",
                     "--port",
                     String(port)
                 ],
-
-                p,
-
-                `http://127.0.0.1:${port}`
-
+                projectPath,
+                port
             );
-
         }
 
 
+        /*
+         * Start script
+         */
 
-        if (
-            exists(
-                p,
-                "public",
-                "index.php"
-            )
-        ) {
-
-
+        if (scripts.start) {
             const port =
-                await findPort(8000);
-
-
+                await findPort(3000);
 
             return runWeb(
-
-                "php",
-
+                pm,
                 [
-                    "-S",
-                    `localhost:${port}`,
-                    "-t",
-                    "public"
+                    "run",
+                    "start",
+                    "--",
+                    "--port",
+                    String(port)
                 ],
-
-                p,
-
-                `http://localhost:${port}`
-
+                projectPath,
+                port
             );
-
         }
 
 
+        /*
+         * package.json main
+         */
 
-        const entry =
+        if (pkg.main) {
+            const main =
+                findEntry(
+                    projectPath,
+                    [pkg.main],
+                    []
+                );
+
+            if (main) {
+                const port =
+                    getPortFromSource(
+                        projectPath,
+                        main
+                    );
+
+                const source =
+                    read(
+                        projectPath,
+                        main
+                    );
+
+                if (
+                    source.includes(".listen(") ||
+                    source.includes(".listen (")
+                ) {
+                    return runWeb(
+                        "node",
+                        [main],
+                        projectPath,
+                        port
+                    );
+                }
+
+                return run(
+                    "node",
+                    [main],
+                    projectPath
+                );
+            }
+        }
+
+
+        /*
+         * Explicit application entrypoints.
+         */
+
+        const js =
             findEntry(
-                p,
+                projectPath,
                 [
-                    "main.php",
-                    "index.php",
-                    "app.php"
+                    "main.js",
+                    "app.js",
+                    "server.js",
+                    "main.mjs",
+                    "app.mjs",
+                    "server.mjs",
+                    "main.cjs",
+                    "app.cjs",
+                    "server.cjs"
                 ],
-                [
-                    ".php"
-                ]
+                []
             );
 
+        if (js) {
+            const source =
+                read(
+                    projectPath,
+                    js
+                );
+
+            const isWeb =
+                source.includes(".listen(") ||
+                source.includes(".listen (");
+
+            if (isWeb) {
+                const port =
+                    getPortFromSource(
+                        projectPath,
+                        js
+                    );
+
+                return runWeb(
+                    "node",
+                    [js],
+                    projectPath,
+                    port
+                );
+            }
+
+            return run(
+                "node",
+                [js],
+                projectPath
+            );
+        }
 
 
-        return entry
+        /*
+         * TypeScript application
+         */
 
-            ? run(
-                "php",
+        const ts =
+            findEntry(
+                projectPath,
                 [
-                    entry
+                    "main.ts",
+                    "app.ts",
+                    "server.ts"
                 ],
-                p
-            )
+                []
+            );
 
-            : noEntry("PHP");
+        if (ts) {
+            return run(
+                "npx",
+                [
+                    "--yes",
+                    "tsx",
+                    ts
+                ],
+                projectPath
+            );
+        }
 
+
+        /*
+         * Package / library
+         */
+
+        console.log(
+            "\n📦 This appears to be a Node.js package/library."
+        );
+
+        console.log(
+            "ℹ️ No executable entrypoint was found."
+        );
+
+        console.log(
+            "ℹ️ Available scripts:"
+        );
+
+        const names =
+            Object.keys(scripts);
+
+        if (names.length === 0) {
+            console.log("   (none)");
+        } else {
+            for (const name of names) {
+                console.log(
+                    `   npm run ${name}`
+                );
+            }
+        }
+
+        return 0;
     }
-
 };

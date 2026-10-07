@@ -1,4 +1,7 @@
 const readline = require("readline");
+const fs = require("fs");
+const path = require("path");
+
 const { detectLanguage } = require("./languages");
 const cloneIfEmpty = require("./utils/git-clone");
 
@@ -18,108 +21,180 @@ function ask(question) {
     });
 }
 
+function findProjectPath(basePath) {
+    const directProject = detectLanguage(basePath);
+
+    if (directProject) {
+        return {
+            path: basePath,
+            project: directProject
+        };
+    }
+
+    const entries = fs
+        .readdirSync(basePath, { withFileTypes: true })
+        .filter(entry =>
+            entry.isDirectory() &&
+            !entry.name.startsWith(".")
+        );
+
+    for (const entry of entries) {
+        const subPath = path.join(
+            basePath,
+            entry.name
+        );
+
+        const project = detectLanguage(subPath);
+
+        if (project) {
+            return {
+                path: subPath,
+                project
+            };
+        }
+    }
+
+    return null;
+}
+
+async function cloneRepository(projectPath) {
+    const answer = await ask(
+        "🌐 Do you want to clone a project from GitHub? (y/n): "
+    );
+
+    if (answer.toLowerCase() !== "y") {
+        return false;
+    }
+
+    const repo = await ask(
+        "🔗 Enter GitHub repository URL: "
+    );
+
+    if (!repo) {
+        console.log(
+            "❌ No URL provided"
+        );
+
+        process.exit(1);
+    }
+
+    console.log(
+        "\n📥 Cloning repository...\n"
+    );
+
+    try {
+        execSync(
+            "git",
+            {
+                cwd: projectPath,
+                stdio: "inherit"
+            }
+        );
+    } catch {}
+
+    try {
+        execSync(
+            `git clone ${repo} .`,
+            {
+                stdio: "inherit",
+                cwd: projectPath
+            }
+        );
+
+        console.log(
+            "\n✅ Clone completed\n"
+        );
+
+        return true;
+
+    } catch {
+        console.log(
+            "\n❌ Clone failed"
+        );
+
+        process.exit(1);
+    }
+}
+
 async function main() {
 
-    const projectPath = process.cwd();
+    const basePath = process.cwd();
 
-    // اگر پوشه خالی بود، پیشنهاد clone بده
-    await cloneIfEmpty(projectPath, ask);
+    await cloneIfEmpty(
+        basePath,
+        ask
+    );
 
+    console.log(
+        "🔍 Analyzing project...\n"
+    );
 
-    console.log("🔍 Analyzing project...\n");
+    let detected = findProjectPath(
+        basePath
+    );
 
-
-    const project = detectLanguage(projectPath);
-
-
-    if (!project) {
+    if (!detected) {
 
         console.log(
             "\n❌ Could not detect project language\n"
         );
 
-        const answer = await ask(
-            "🌐 Do you want to clone a project from GitHub? (y/n): "
-        );
+        const cloned =
+            await cloneRepository(basePath);
 
-
-        if (answer.toLowerCase() === "y") {
-
-            const repo = await ask(
-                "🔗 Enter GitHub repository URL: "
-            );
-
-
-            if (!repo) {
-                console.log(
-                    "❌ No URL provided"
-                );
-
-                process.exit(1);
-            }
-
-
-            console.log(
-                "\n📥 Cloning repository...\n"
-            );
-
-
-            try {
-
-                execSync(
-                    `git clone ${repo} .`,
-                    {
-                        stdio: "inherit",
-                        cwd: projectPath
-                    }
-                );
-
-
-                console.log(
-                    "\n✅ Clone completed\n"
-                );
-
-
-            } catch (err) {
-
-                console.log(
-                    "\n❌ Clone failed"
-                );
-
-                process.exit(1);
-            }
-
-
-            // دوباره تشخیص بده
-            return main();
-
+        if (!cloned) {
+            process.exit(1);
         }
 
+        console.log(
+            "🔍 Analyzing cloned project...\n"
+        );
 
-        process.exit(1);
+        detected = findProjectPath(
+            basePath
+        );
 
+        if (!detected) {
+            console.log(
+                "\n❌ Could not detect a supported project\n"
+            );
+
+            process.exit(1);
+        }
     }
 
+    const projectPath =
+        detected.path;
 
+    const project =
+        detected.project;
 
-    console.log(`✅ Language: ${project.name}`);
-    console.log(`🔧 Type: ${project.id}`);
+    if (projectPath !== basePath) {
+        console.log(
+            `📁 Project found in: ${path.relative(basePath, projectPath)}\n`
+        );
+    }
 
+    console.log(
+        `✅ Language: ${project.name}`
+    );
 
+    console.log(
+        `🔧 Type: ${project.id}`
+    );
 
-    console.log("\n⚙ Checking runtime...");
-
+    console.log(
+        "\n⚙ Checking runtime..."
+    );
 
     const tools =
         typeof project.tools === "function"
             ? project.tools(projectPath)
             : [];
 
-
     for (const tool of tools) {
 
         let installed = false;
-
 
         try {
 
@@ -133,14 +208,9 @@ async function main() {
 
             installed = true;
 
-
         } catch {
-
             installed = false;
-
         }
-
-
 
         if (installed) {
 
@@ -154,81 +224,65 @@ async function main() {
                 `❌ ${tool.command} missing`
             );
 
-
             const answer = await ask(
                 `Install ${tool.package}? (y/n): `
             );
 
-
-            if (answer.toLowerCase() !== "y") {
-
+            if (
+                answer.toLowerCase() !== "y"
+            ) {
                 process.exit(1);
-
             }
-
 
             const install =
                 require("./installers/arch");
 
-
             if (!install(tool.package)) {
-
                 process.exit(1);
-
             }
-
         }
-
     }
 
-
-
-    if (typeof project.dependencies === "function") {
-
+    if (
+        typeof project.dependencies ===
+        "function"
+    ) {
 
         const dependencies =
-            project.dependencies(projectPath);
-
-
+            project.dependencies(
+                projectPath
+            );
 
         if (dependencies) {
-
 
             console.log(
                 "\n📚 Checking dependencies..."
             );
 
-
-
             if (dependencies.installed) {
-
 
                 console.log(
                     "✅ Dependencies are installed"
                 );
 
-
             } else {
-
 
                 console.log(
                     "❌ Dependencies missing"
                 );
 
-
                 const answer = await ask(
-                    `${dependencies.prompt || "Install dependencies?"} (y/n): `
+                    `${
+                        dependencies.prompt ||
+                        "Install dependencies?"
+                    } (y/n): `
                 );
 
-
-
-                if (answer.toLowerCase() !== "y") {
-
+                if (
+                    answer.toLowerCase() !== "y"
+                ) {
                     process.exit(1);
-
                 }
-
-
 
                 if (!dependencies.install()) {
 
@@ -237,50 +291,36 @@ async function main() {
                     );
 
                     process.exit(1);
-
                 }
-
-
             }
-
         }
-
     }
-
-
 
     console.log(
         "\n🎯 Analysis complete!"
     );
 
-
-
-    if (typeof project.run !== "function") {
+    if (
+        typeof project.run !==
+        "function"
+    ) {
 
         console.log(
             "❌ No runner available"
         );
 
         process.exit(1);
-
     }
-
-
 
     const exitCode =
-        await project.run(projectPath);
-
-
+        await project.run(
+            projectPath
+        );
 
     if (exitCode !== 0) {
-
         process.exit(exitCode);
-
     }
-
 }
-
-
 
 main().catch(err => {
 
@@ -290,5 +330,4 @@ main().catch(err => {
     );
 
     process.exit(1);
-
 });
