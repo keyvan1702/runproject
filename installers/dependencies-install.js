@@ -1,33 +1,80 @@
-const { execSync } = require("child_process");
+
+const { spawnSync } = require("child_process");
+
+
+const commands = {
+
+    npm: [
+        "npm",
+        ["install"]
+    ],
+
+    pnpm: [
+        "pnpm",
+        ["install"]
+    ],
+
+    yarn: [
+        "yarn",
+        ["install"]
+    ]
+};
+
 
 function installDependencies(packageManager) {
-    const commands = {
-        npm: "npm install",
-        pnpm: "pnpm install",
-        yarn: "yarn install"
-    };
 
-    const command = commands[packageManager];
+    const config =
+        commands[packageManager];
 
-    if (!command) {
-        console.log(`❌ Unsupported package manager: ${packageManager}`);
+    if (!config) {
+
+        console.log(
+            `❌ Unsupported package manager: ${packageManager}`
+        );
+
         return false;
     }
 
-    console.log(`📦 Running: ${command}\n`);
+    const [command, args] =
+        config;
 
-    try {
-        execSync(command, {
-            stdio: "inherit",
-            shell: "/bin/bash"
-        });
+    console.log(
+        `📦 Running: ${command} ${args.join(" ")}\n`
+    );
 
-        console.log("\n✅ Dependencies installed successfully");
-        return true;
-    } catch {
-        console.log("\n❌ Failed to install dependencies");
+    const result =
+        spawnSync(
+            command,
+            args,
+            {
+                stdio: "inherit"
+            }
+        );
+
+    if (result.error) {
+
+        console.log(
+            `\n❌ Failed to run ${command}: ${result.error.message}`
+        );
+
         return false;
     }
+
+    if (result.status !== 0) {
+
+        console.log(
+            `\n❌ Failed to install dependencies`
+        );
+
+        return false;
+    }
+
+    console.log(
+        "\n✅ Dependencies installed successfully"
+    );
+
+    return true;
 }
+
 
 module.exports = installDependencies;
