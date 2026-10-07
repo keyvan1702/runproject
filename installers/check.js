@@ -1,18 +1,29 @@
 const { execSync } = require("child_process");
-
 function commandExists(command) {
     try {
-        execSync(`command -v ${command}`, {
-            stdio: "ignore",
-            shell: "/bin/bash"
-        });
+        if (process.platform === "win32") {
+            execSync(
+                `where ${command}`,
+                {
+                    stdio: "ignore",
+                    shell: true
+                }
+            );
+        } else {
+            execSync(
+                `command -v ${command}`,
+                {
+                    stdio: "ignore",
+                    shell: true
+                }
+            );
+        }
 
         return true;
     } catch {
         return false;
     }
 }
-
 const runtimes = {
     node: {
         command: "node",
