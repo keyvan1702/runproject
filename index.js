@@ -235,7 +235,7 @@ async function main() {
             }
 
             const install =
-                require("./installers/arch");
+               require("./installers/package-install");
 
             if (!install(tool.package)) {
                 process.exit(1);
