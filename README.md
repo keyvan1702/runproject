@@ -271,7 +271,7 @@ runproject/
 │   └── index.js
 │
 ├── installers/
-│   ├── arch.js
+│   ├── package-install.js
 │   ├── check.js
 │   ├── dependencies.js
 │   ├── dependencies-install.js
